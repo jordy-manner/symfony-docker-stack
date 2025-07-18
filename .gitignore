@@ -1,0 +1,7 @@
+###> application ###
+app
+###< application ###
+
+###> config ###
+.config.env.local
+###< config ###

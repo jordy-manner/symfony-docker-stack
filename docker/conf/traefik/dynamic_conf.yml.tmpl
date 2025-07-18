@@ -1,0 +1,13 @@
+tls:
+  certificates:
+    - certFile: "/etc/certs/${CERT_CRT}"
+      keyFile: "/etc/certs/${CERT_KEY}"
+
+http:
+  routers:
+    traefik:
+      rule: "Host(`${SERVE_REVERSE_PROXY}`)"
+      entryPoints:
+        - websecure
+      service: "api@internal"
+      tls: {}

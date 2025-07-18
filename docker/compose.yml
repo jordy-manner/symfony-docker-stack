@@ -1,0 +1,123 @@
+services:
+  adminer:
+    image: mast3rm1lk/adminer-autologin
+    environment:
+      ADMINER_AUTOLOGIN: 1
+      ADMINER_DB: ${DB_NAME}
+      ADMINER_USERNAME: ${DB_USER}
+      ADMINER_PASSWORD: ${DB_PASSWORD}
+      ADMINER_SERVER: ${DB_HOST}
+      ADMINER_NAME: DB Manager
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.db.entrypoints: "websecure"
+      traefik.http.routers.db.rule: "Host(`${SERVE_DBMGR_PROXY}`)"
+      traefik.http.routers.db.tls: "true"
+      traefik.http.services.db.loadbalancer.server.port: "8080"
+    depends_on:
+      - db
+
+  db:
+    build:
+      context: .
+      dockerfile: ${DOCKER_DIR}/build/postgres/Dockerfile
+    environment:
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+# MYSQL DB
+#  db:
+#    build:
+#      context: .
+#      dockerfile: ${DOCKER_DIR}/build/mariadb/Dockerfile
+#    environment:
+#      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+#      MYSQL_DATABASE: ${DB_NAME}
+#      MYSQL_USER: ${DB_USER}
+#      MYSQL_PASSWORD: ${DB_PASSWORD}
+#      MYSQLD__character-set-server: 'utf8'
+#      MYSQLD__max_allowed_packet: '128M'
+
+  expose:
+    build:
+      context: .
+      dockerfile: ${DOCKER_DIR}/build/expose/Dockerfile
+    init: true
+
+  mail:
+    image: axllent/mailpit
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.mail.entrypoints: "websecure"
+      traefik.http.routers.mail.rule: "Host(`${SERVE_MAILCATCH_PROXY}`)"
+      traefik.http.routers.mail.tls: "true"
+      traefik.http.services.mail.loadbalancer.server.port: "8025"
+
+  ngrok:
+    image: ngrok/ngrok:latest
+
+  node:
+    build:
+      args:
+        USER_NAME: ${LOCAL_USERNAME}
+        USER_UID: ${LOCAL_UID}
+      context: .
+      dockerfile: ${DOCKER_DIR}/build/node/Dockerfile
+    user: ${LOCAL_UID}
+    environment:
+      APP_URL: ${NPM_DEV_APP_URL}
+    command: sleep infinity
+    volumes:
+      - ${APP_DIR}:/usr/src/app
+      - ${DOCKER_DIR}/data/certs:/usr/src/certs
+    ports:
+      - "3000:3000"
+
+  traefik:
+    image: traefik:v2.11
+    restart: unless-stopped
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.traefik.entrypoints: "websecure"
+      traefik.http.routers.traefik.rule: "Host(`${SERVE_REVERSE_PROXY}`)"
+      traefik.http.routers.traefik.service: "api@internal"
+      traefik.http.routers.traefik.tls: "true"
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ${DOCKER_DIR}/conf/traefik/dynamic_conf.yml:/etc/traefik/dynamic_conf.yml:ro
+      - ${DOCKER_DIR}/conf/traefik/traefik.yml:/etc/traefik/traefik.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ${DOCKER_DIR}/data/certs:/etc/certs
+
+  web:
+    build:
+      args:
+        USER_NAME: ${LOCAL_USERNAME}
+        USER_UID: ${LOCAL_UID}
+      context: .
+      dockerfile: ${DOCKER_DIR}/build/web/Dockerfile
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.web.entrypoints: "web"
+      traefik.http.routers.web.rule: "Host(`${SERVE_WEB_PROXY}`)"
+      traefik.http.routers.web.tls: "false"
+      traefik.http.routers.websecure.entrypoints: "websecure"
+      traefik.http.routers.websecure.rule: "Host(`${SERVE_WEB_PROXY}`)"
+      traefik.http.routers.websecure.tls: "true"
+    volumes:
+      - ${APP_DIR}:/var/www/html/app
+      - ${PROJECT_DIR}/.git:/var/www/html/.git
+      - ${LOCAL_HOME}/.composer:/home/${LOCAL_USERNAME}/.composer
+      - ${DOCKER_DIR}/conf/php/99-custom.ini:/usr/local/etc/php/conf.d/99-custom.ini
+    depends_on:
+      - db
+
+volumes:
+  postgres-data:

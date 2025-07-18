@@ -1,0 +1,4 @@
+###> certificates ###
+data/certs/
+!data/certs/.gitkeep
+###< certificates ###

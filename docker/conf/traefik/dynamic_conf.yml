@@ -1,0 +1,13 @@
+tls:
+  certificates:
+    - certFile: "/etc/certs/sfds.localtest.me.crt"
+      keyFile: "/etc/certs/sfds.localtest.me.key"
+
+http:
+  routers:
+    traefik:
+      rule: "Host(`traefik.sfds.localtest.me`)"
+      entryPoints:
+        - websecure
+      service: "api@internal"
+      tls: {}
