@@ -15,7 +15,7 @@ include $(DOCKER_DIR)/conf/.env
 
 # set binary
 composer = @$(php) -d memory_limit=-1 /usr/local/bin/composer --working-dir=app/
-console = @$(php) php -d memory_limit=-1 app/bin/console
+console = @$(php) -d memory_limit=-1 app/bin/console
 docker-compose = docker compose -f $(DOCKER_DIR)/compose.yml -f $(DOCKER_DIR)/compose.override.yml -p $(PROJECT_NAME)
 node = @$(docker-compose) exec node
 php = @$(docker-compose) run --rm web php
