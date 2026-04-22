@@ -2,6 +2,7 @@ services:
   adminer:
     image: mast3rm1lk/adminer-autologin
     environment:
+      ADMINER_DRIVER: pgsql
       ADMINER_AUTOLOGIN: 1
       ADMINER_DB: ${DB_NAME}
       ADMINER_USERNAME: ${DB_USER}

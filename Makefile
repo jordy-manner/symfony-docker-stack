@@ -117,7 +117,7 @@ init-install: ## Install application dependencies.
 
 .PHONY: init-clean
 init-clean: ## Clean to allow retry initialization.
-	@rm -rf ${APP_DIR}/* ${APP_DIR}/.[!.]* ${APP_DIR}/..?*
+	@rm -rf ${APP_DIR}
 
 ##@ General
 .PHONY: help
@@ -166,7 +166,7 @@ open: ## Open browser
 
 ##@ Install
 .PHONY: install
-install: up install-cert install-dependencies info ## ## Installing project
+install: up install-cert install-dependencies install-database post-install info ## ## Installing project
 
 .PHONY: install-cert
 install-cert: cert-init-ca cert-sign cert-generate-traefik-config cert-import-ca
@@ -193,7 +193,11 @@ install-fixtures: ## Install application fixtures.
 
 .PHONY: post-install
 post-install: ## Execute post-install scripts.
-	@$(docker-compose) exec -u ${LOCAL_USERNAME} web /bin/bash scripts/post-install.sh
+	@if [ -f "$(APP_DIR)/scripts/post-install.sh" ]; then \
+		$(docker-compose) exec -u ${LOCAL_USERNAME} web /bin/bash scripts/post-install.sh; \
+	else \
+		echo "No post-install scripts file found at $(APP_DIR)/scripts/post-install.sh. Please create it before."; \
+	fi
 
 .PHONY: uninstall
 uninstall: clean ## Uninstall application.
