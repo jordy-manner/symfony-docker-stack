@@ -15,10 +15,10 @@ include $(DOCKER_DIR)/conf/.env
 
 # set binary
 composer = @$(php) -d memory_limit=-1 /usr/local/bin/composer --working-dir=app/
-console = @$(php) -d memory_limit=-1 app/bin/console
 docker-compose = docker compose -f $(DOCKER_DIR)/compose.yml -f $(DOCKER_DIR)/compose.override.yml -p $(PROJECT_NAME)
 node = @$(docker-compose) exec node
 php = @$(docker-compose) run --rm web php
+console = @$(php) -d memory_limit=-1 app/bin/console
 
 # output colors
 C_BLACK=\033[0;30m
@@ -84,12 +84,12 @@ config_vars=\
 
 ##@ Initialization (should be deleted on your own project)
 .PHONY: init ## Initialize application.
-init: up init-cert init-create init-dependencies info
+init: init-precreate init-create init-install info
 
-.PHONY: init ## Clean, flush and  renew initialization.
-reinit: init-reset init-clean down init
+.PHONY: init-retry ## Clean, flush and  renew initialization.
+init-retry: init-reset init-clean down init
 
-
+.PHONY: init-reset ## Reset prompt
 init-reset:
 	@echo "⚠️  WARNING: This will delete the application folder and all related data!" && \
 	read -p "Are you sure you want to continue? [y/N] " answer; \
@@ -99,22 +99,24 @@ init-reset:
 	fi; \
 	echo "Proceeding with reset..."; \
 
-.PHONY: init-cert
-init-cert: install-cert
+.PHONY: init-precreate
+init-precreate: ## Download and install Roots/Sage.
+	@mkdir $(APP_DIR)
 
 .PHONY: init-create
-init-create: ## Download and install Roots/Sage.
-	$(docker-compose) exec -ti web bash -c '/usr/local/bin/composer create-project symfony/skeleton:"${or ${version}, 6.4.x}" app/'
-##? [version="{{ version }}"]	Symfony version, 6.4.x by default.
+init-create: up ## Download and install Roots/Sage.
+	$(docker-compose) exec -ti web bash -c '/usr/local/bin/composer create-project symfony/skeleton:"${or ${SF_VERSION}, 8.0.x}" app/'
+##? [version="{{ version }}"]	Symfony version, 8.0.x by default.
 
-.PHONY: init-dependencies
-init-dependencies: ## Install application dependencies.
-	$(composer) remove symfony/ux-turbo symfony/asset-mapper symfony/stimulus-bundle
+.PHONY: init-install
+init-install: ## Install application dependencies.
 	$(composer) require webapp symfony/webpack-encore-bundle
-	@make npm CMD="install"
-	@make npm CMD="run build"
+	$(composer) require --dev orm-fixtures
+	$(composer) remove symfony/ux-turbo symfony/asset-mapper symfony/stimulus-bundle
+	@make install
 
-init-clean: ## Clean initialization to allow renewing.
+.PHONY: init-clean
+init-clean: ## Clean to allow retry initialization.
 	@rm -rf ${APP_DIR}/* ${APP_DIR}/.[!.]* ${APP_DIR}/..?*
 
 ##@ General
@@ -149,8 +151,10 @@ info: ## Show services info.
 
 .PHONY: ip
 ip: ## Show container IP.
-	@docker inspect -f '{{range.NetworkSettings.Networks}}{{.IPAddress}}{{end}}' $$($(docker-compose) ps -aq ${or ${container}, web})
-##? [container="{{ name }}"]	Service name, web by default.
+	@svc='$(or $(container),web)'; \
+	name='$(PROJECT_NAME)-'$$svc'-1'; \
+	docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$$name"
+##? [container="{{ name }}"] Service name, web by default.
 
 .PHONY: ips
 ips: ## Show container IPs.
@@ -162,7 +166,7 @@ open: ## Open browser
 
 ##@ Install
 .PHONY: install
-install: build up install-dependencies install-database install-fixtures post-install info ## ## Installing project
+install: up install-cert install-dependencies info ## ## Installing project
 
 .PHONY: install-cert
 install-cert: cert-init-ca cert-sign cert-generate-traefik-config cert-import-ca
@@ -171,15 +175,15 @@ install-cert: cert-init-ca cert-sign cert-generate-traefik-config cert-import-ca
 .PHONY: install-dependencies
 install-dependencies: ## Install application dependencies.
 	@$(composer) install --no-interaction --no-progress --optimize-autoloader --prefer-dist
-	@make yarn CMD="install"
-	@make yarn CMD="build"
+	@make npm CMD="install"
+	@make npm CMD="run build"
 
 .PHONY: install-database
 install-database: ## Install application database.
 	@if [ -f "$(DB_DUMP_INSTALL_PATH)" ]; then \
 		make up container=db; \
 		make db-import FILE=$(DB_DUMP_INSTALL_PATH); \
-		$(console) doctrine:migrations:migrate --allow-no-migration --no-interaction --quiet
+		$(console) doctrine:migrations:migrate --allow-no-migration --no-interaction --quiet; \
 	else \
 		echo "No database dump file found at $(DB_DUMP_INSTALL_PATH). Please create it before installing the database."; \
 	fi
@@ -201,7 +205,14 @@ reinstall: uninstall install ## Reinstall application.
 
 .PHONY: clean
 clean: ## Remove application dependencies.
-	@rm -rf $(APP_ROOT_DIR)/var/cache $(APP_ROOT_DIR)/var/log $(APP_ROOT_DIR)/vendor/ $(APP_ROOT_DIR)/node_modules $(APP_ROOT_DIR)/public/build $(APP_ROOT_DIR)/public/bundles
+	@echo "⚠️  WARNING: This will delete the application folder and all related data!" && \
+	read -p "Are you sure you want to continue? [y/N] " answer; \
+	if [ "$$answer" != "y" ]; then \
+		echo "Aborted."; \
+		exit 1; \
+	fi; \
+	echo "Proceeding with reset..."; \
+	rm -rf $(APP_ROOT_DIR)/var/cache $(APP_ROOT_DIR)/var/log $(APP_ROOT_DIR)/vendor/ $(APP_ROOT_DIR)/node_modules $(APP_ROOT_DIR)/public/build $(APP_ROOT_DIR)/public/bundles
 
 .PHONY: start
 start: up install-dependencies post-install info ## Start application.
@@ -313,29 +324,6 @@ composer: ## Launch composer command.
 	@$(composer) ${or ${CMD}, list}
 ##? [CMD="{{ command }}"]		[list] by default.
 
-.PHONY: console
-console: ## Launch Symfony console command.
-	@$(console) ${or ${CMD}, list}
-##? [CMD="{{ command }}"]		[list] by default.
-
-.PHONY: mailer
-mailer: ## @todo Open a terminal to test mail send.
-	@curl -X POST "http://`make ip container=mail -s`:8025/api/v1/send" \
-     -H 'accept: application/json'\
-     -H 'content-type: application/json' \
-     -d '{"Attachments":[{"Content":"iVBORw0KGgoAAAANSUhEUgAAAEEAAAA8CAMAAAAOlSdoAAAACXBIWXMAAAHrAAAB6wGM2bZBAAAAS1BMVEVHcEwRfnUkZ2gAt4UsSF8At4UtSV4At4YsSV4At4YsSV8At4YsSV4At4YsSV4sSV4At4YsSV4At4YtSV4At4YsSV4At4YtSV8At4YsUWYNAAAAGHRSTlMAAwoXGiktRE5dbnd7kpOlr7zJ0d3h8PD8PCSRAAACWUlEQVR42pXT4ZaqIBSG4W9rhqQYocG+/ys9Y0Z0Br+x3j8zaxUPewFh65K+7yrIMeIY4MT3wPfEJCidKXEMnLaVkxDiELiMz4WEOAZSFghxBIypCOlKiAMgXfIqTnBgSm8CIQ6BImxEUxEckClVQiHGj4Ba4AQHikAIClwTE9KtIghAhUJwoLkmLnCiAHJLRKgIMsEtVUKbBUIwoAg2C4QgQBE6l4VCnApBgSKYLLApCnCa0+96AEMW2BQcmC+Pr3nfp7o5Exy49gIADcIqUELGfeA+bp93LmAJp8QJoEcN3C7NY3sbVANixMyI0nku20/n5/ZRf3KI2k6JEDWQtxcbdGuAqu3TAXG+/799Oyyas1B1MnMiA+XyxHp9q0PUKGPiRAau1fZbLRZV09wZcT8/gHk8QQAxXn8VgaDqcUmU6O/r28nbVwXAqca2mRNtPAF5+zoP2MeN9Fy4NgC6RfcbgE7XITBRYTtOE3U3C2DVff7pk+PkUxgAbvtnPXJaD6DxulMLwOhPS/M3MQkgg1ZFrIXnmfaZoOfpKiFgzeZD/WuKqQEGrfJYkyWf6vlG3xUgTuscnkNkQsb599q124kdpMUjCa/XARHs1gZymVtGt3wLkiFv8rUgTxitYCex5EVGec0Y9VmoDTFBSQte2TfXGXlf7hbdaUM9Sk7fisEN9qfBBTK+FZcvM9fQSdkl2vj4W2oX/bRogO3XasiNH7R0eW7fgRM834ImTg+Lg6BEnx4vz81rhr+MYPBBQg1v8GndEOrthxaCTxNAOut8WKLGZQl+MPz88Q9tAO/hVuSeqQAAAABJRU5ErkJggg==","ContentID":"mailpit-logo","ContentType":"image/png","Filename":"mailpit.png"}],"Bcc":["jack@example.com"],"Cc":[{"Email":"manager@example.com","Name":"Manager"}],"From":{"Email":"john@example.com","Name":"John Doe"},"HTML":"<div style=\"text-align:center\"><p style=\"font-family: arial; font-size: 24px;\">Mailpit is <b>awesome</b>!</p><p><img src=\"cid:mailpit-logo\" /></p></div>","Headers":{"X-IP":"1.2.3.4"},"ReplyTo":[{"Email":"secretary@example.com","Name":"Secretary"}],"Subject":"Mailpit message via the HTTP API","Tags":["Tag 1","Tag 2"],"Text":"Mailpit is awesome!","To":[{"Email":"jane@example.com","Name":"Jane Doe"}]}'
-
-.PHONY: share
-share: guard-NGROK_AUTHTOKEN ## Publicly expose app on the web with nGrok (NGROK_AUTHTOKEN required).
-	@$(docker-compose) run --rm -p 4040:4040 -e NGROK_AUTHTOKEN=${NGROK_AUTHTOKEN} ngrok http ${or ${server}, http://`make ip container=web -s`}
-##? [server="{{ server }}"]	expose web service by default.
-
-.PHONY: expose
-expose: guard-EXPOSE_SHARE_TOKEN ## Publicly expose app on the web with expose.dev (EXPOSE_SHARE_TOKEN required).
-	@$(docker-compose) run --rm -p 4040:4040 expose share --auth=${EXPOSE_SHARE_TOKEN} -- ${or ${server}, "http://`make ip container=web -s`"}
-##? [server="{{ server }}"]	expose web service by default.
-
-##@ NodeJS
 .PHONY: node
 node:  ## Launch a NodeJS command.
 	@$(node) ${or ${CMD}, -h}
@@ -360,6 +348,28 @@ yarn: $(APP_DIR)/package.json $(wildcard $(APP_DIR)/package-lock.json) ## Launch
 pnpm: $(APP_DIR)/package.json $(wildcard $(APP_DIR)/package-lock.json) ## Launch a PNPM command.
 	@$(node) pnpm ${or ${CMD}, -h}
 ##? [CMD="{{ command }}"]		[-h] by default.
+
+.PHONY: console
+console: ## Launch Symfony console command.
+	@$(console) ${or ${CMD}, list}
+##? [CMD="{{ command }}"]		[list] by default.
+
+.PHONY: mailer
+mailer: ## @todo Open a terminal to test mail send.
+	@curl -X POST "http://`make ip container=mail -s`:8025/api/v1/send" \
+     -H 'accept: application/json'\
+     -H 'content-type: application/json' \
+     -d '{"Attachments":[{"Content":"iVBORw0KGgoAAAANSUhEUgAAAEEAAAA8CAMAAAAOlSdoAAAACXBIWXMAAAHrAAAB6wGM2bZBAAAAS1BMVEVHcEwRfnUkZ2gAt4UsSF8At4UtSV4At4YsSV4At4YsSV8At4YsSV4At4YsSV4sSV4At4YsSV4At4YtSV4At4YsSV4At4YtSV8At4YsUWYNAAAAGHRSTlMAAwoXGiktRE5dbnd7kpOlr7zJ0d3h8PD8PCSRAAACWUlEQVR42pXT4ZaqIBSG4W9rhqQYocG+/ys9Y0Z0Br+x3j8zaxUPewFh65K+7yrIMeIY4MT3wPfEJCidKXEMnLaVkxDiELiMz4WEOAZSFghxBIypCOlKiAMgXfIqTnBgSm8CIQ6BImxEUxEckClVQiHGj4Ba4AQHikAIClwTE9KtIghAhUJwoLkmLnCiAHJLRKgIMsEtVUKbBUIwoAg2C4QgQBE6l4VCnApBgSKYLLApCnCa0+96AEMW2BQcmC+Pr3nfp7o5Exy49gIADcIqUELGfeA+bp93LmAJp8QJoEcN3C7NY3sbVANixMyI0nku20/n5/ZRf3KI2k6JEDWQtxcbdGuAqu3TAXG+/799Oyyas1B1MnMiA+XyxHp9q0PUKGPiRAau1fZbLRZV09wZcT8/gHk8QQAxXn8VgaDqcUmU6O/r28nbVwXAqca2mRNtPAF5+zoP2MeN9Fy4NgC6RfcbgE7XITBRYTtOE3U3C2DVff7pk+PkUxgAbvtnPXJaD6DxulMLwOhPS/M3MQkgg1ZFrIXnmfaZoOfpKiFgzeZD/WuKqQEGrfJYkyWf6vlG3xUgTuscnkNkQsb599q124kdpMUjCa/XARHs1gZymVtGt3wLkiFv8rUgTxitYCex5EVGec0Y9VmoDTFBSQte2TfXGXlf7hbdaUM9Sk7fisEN9qfBBTK+FZcvM9fQSdkl2vj4W2oX/bRogO3XasiNH7R0eW7fgRM834ImTg+Lg6BEnx4vz81rhr+MYPBBQg1v8GndEOrthxaCTxNAOut8WKLGZQl+MPz88Q9tAO/hVuSeqQAAAABJRU5ErkJggg==","ContentID":"mailpit-logo","ContentType":"image/png","Filename":"mailpit.png"}],"Bcc":["jack@example.com"],"Cc":[{"Email":"manager@example.com","Name":"Manager"}],"From":{"Email":"john@example.com","Name":"John Doe"},"HTML":"<div style=\"text-align:center\"><p style=\"font-family: arial; font-size: 24px;\">Mailpit is <b>awesome</b>!</p><p><img src=\"cid:mailpit-logo\" /></p></div>","Headers":{"X-IP":"1.2.3.4"},"ReplyTo":[{"Email":"secretary@example.com","Name":"Secretary"}],"Subject":"Mailpit message via the HTTP API","Tags":["Tag 1","Tag 2"],"Text":"Mailpit is awesome!","To":[{"Email":"jane@example.com","Name":"Jane Doe"}]}'
+
+.PHONY: share
+share: guard-NGROK_AUTHTOKEN ## Publicly expose app on the web with nGrok (NGROK_AUTHTOKEN required).
+	@$(docker-compose) run --rm -p 4040:4040 -e NGROK_AUTHTOKEN=${NGROK_AUTHTOKEN} ngrok http ${or ${server}, http://`make ip container=web -s`}
+##? [server="{{ server }}"]	expose web service by default.
+
+.PHONY: expose
+expose: guard-EXPOSE_SHARE_TOKEN ## Publicly expose app on the web with expose.dev (EXPOSE_SHARE_TOKEN required).
+	@$(docker-compose) run --rm -p 4040:4040 expose share --auth=${EXPOSE_SHARE_TOKEN} -- ${or ${server}, "http://`make ip container=web -s`"}
+##? [server="{{ server }}"]	expose web service by default.
 
 ##@ Database
 .PHONY: db-import

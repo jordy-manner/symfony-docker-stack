@@ -77,7 +77,7 @@ services:
       - "3000:3000"
 
   traefik:
-    image: traefik:v2.11
+    image: traefik:v3.5
     restart: unless-stopped
     labels:
       traefik.enable: "true"

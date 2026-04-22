@@ -21,7 +21,7 @@ make init
 if you run another instance before a first `init` you should run:
 
 ```shell
-make reinit
+make init-retry
 ```
 
 > Be careful `reinit` action will delete database and theme files.
