@@ -1,4 +1,4 @@
-FROM php:8.4-apache
+FROM dunglas/frankenphp:php8.4
 
 # Arguments defined in docker-compose.yml
 ARG USER_UID
@@ -19,12 +19,8 @@ RUN apt update && \
 # Clean
 RUN apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Install system dependencies
-ADD --chmod=0755 https://github.com/mlocati/docker-php-extension-installer/releases/latest/download/install-php-extensions /usr/local/bin/
+# Install PHP extensions (install-php-extensions est déjà inclus dans l'image FrankenPHP)
 RUN install-php-extensions @composer apcu gd intl opcache pdo_pgsql pgsql zip
-
-# Apache config
-RUN sed -ri -e 's!/var/www/html!/var/www/html/app/public!g' /etc/apache2/sites-available/000-default.conf
 
 # Sendmail
 RUN echo "hostname=localhost.localdomain" > /etc/ssmtp/ssmtp.conf
@@ -34,21 +30,24 @@ RUN echo "mailhub=mail:1025" >> /etc/ssmtp/ssmtp.conf
 RUN echo "sendmail_path=sendmail -i -t" >> ${PHP_INI_DIR}/conf.d/98-sendmail.ini
 RUN echo "smtp_port=1025" >> ${PHP_INI_DIR}/conf.d/98-sendmail.ini
 
-# Create system user to run Composer
+# Create system user to run Composer and app
 RUN useradd -G www-data,root -u ${USER_UID} -d /home/${USER_NAME} ${USER_NAME}
 RUN mkdir -p /home/${USER_NAME} && chown -R ${USER_NAME}:${USER_NAME} /home/${USER_NAME}
 
-RUN a2enmod rewrite
+# Caddy data dir — doit appartenir à l'user non-root
+RUN mkdir -p /data/caddy /config/caddy && \
+    chown -R ${USER_UID}:${USER_UID} /data /config
 
 # Use local user
 USER ${USER_NAME}
 
 # Config git
-RUN git config --global --add safe.directory /var/www/html
+RUN git config --global --add safe.directory /app
 
-# Set working directory
-WORKDIR /var/www/html
+# Set working directory — FrankenPHP sert depuis /app/public par défaut
+WORKDIR /app
 
-CMD ["apachectl", "-D", "FOREGROUND"]
+# FrankenPHP est derrière Traefik qui gère le TLS → on écoute en HTTP simple
+ENV SERVER_NAME=":80"
 
-EXPOSE 80 443
+EXPOSE 80 443 443/udp

@@ -97,6 +97,35 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ${DOCKER_DIR}/data/certs:/etc/certs
 
+#  web:
+#    build:
+#      args:
+#        USER_NAME: ${LOCAL_USERNAME}
+#        USER_UID: ${LOCAL_UID}
+#      context: .
+#      dockerfile: ${DOCKER_DIR}/build/web/Dockerfile
+#    environment:
+#      # FrankenPHP écoute en HTTP derrière Traefik qui gère le TLS
+#      SERVER_NAME: ":80"
+#    labels:
+#      traefik.enable: "true"
+#      traefik.http.routers.web.entrypoints: "web"
+#      traefik.http.routers.web.rule: "Host(`${SERVE_WEB_PROXY}`)"
+#      traefik.http.routers.web.tls: "false"
+#      traefik.http.routers.websecure.entrypoints: "websecure"
+#      traefik.http.routers.websecure.rule: "Host(`${SERVE_WEB_PROXY}`)"
+#      traefik.http.routers.websecure.tls: "true"
+#      # FrankenPHP écoute sur le port 80 (HTTP interne)
+#      traefik.http.services.web.loadbalancer.server.port: "80"
+#    volumes:
+#      # FrankenPHP sert depuis /app — l'app doit être dans /app/public
+#      - ${APP_DIR}:/app
+#      - ${PROJECT_DIR}/.git:/app/.git
+#      - ${LOCAL_HOME}/.composer:/home/${LOCAL_USERNAME}/.composer
+#      - ${DOCKER_DIR}/conf/php/99-custom.ini:/usr/local/etc/php/conf.d/99-custom.ini
+#    depends_on:
+#      - db
+
   web:
     build:
       args:
@@ -104,6 +133,11 @@ services:
         USER_UID: ${LOCAL_UID}
       context: .
       dockerfile: ${DOCKER_DIR}/build/web/Dockerfile
+    environment:
+      SERVER_NAME: ":80"
+      SYMFONY_TRUSTED_PROXIES: "127.0.0.1,172.16.0.0/12,REMOTE_ADDR"
+      FRANKENPHP_CONFIG: "worker /app/public/index.php"
+      APP_RUNTIME: "Runtime\\FrankenPhpSymfony\\Runtime"
     labels:
       traefik.enable: "true"
       traefik.http.routers.web.entrypoints: "web"
@@ -112,13 +146,18 @@ services:
       traefik.http.routers.websecure.entrypoints: "websecure"
       traefik.http.routers.websecure.rule: "Host(`${SERVE_WEB_PROXY}`)"
       traefik.http.routers.websecure.tls: "true"
+      traefik.http.services.web.loadbalancer.server.port: "80"
     volumes:
-      - ${APP_DIR}:/var/www/html/app
-      - ${PROJECT_DIR}/.git:/var/www/html/.git
+      - ${APP_DIR}:/app
+      - ${PROJECT_DIR}/.git:/app/.git
       - ${LOCAL_HOME}/.composer:/home/${LOCAL_USERNAME}/.composer
       - ${DOCKER_DIR}/conf/php/99-custom.ini:/usr/local/etc/php/conf.d/99-custom.ini
+      - caddy_data:/data
+      - caddy_config:/config
     depends_on:
       - db
 
 volumes:
   postgres-data:
+  caddy_data:
+  caddy_config:
